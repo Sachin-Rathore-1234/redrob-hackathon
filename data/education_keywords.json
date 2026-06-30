@@ -1,0 +1,23 @@
+{
+    "bachelor": [
+        "bachelor",
+        "b.tech",
+        "btech",
+        "b.e",
+        "be",
+        "bs",
+        "b.sc"
+    ],
+    "master": [
+        "master",
+        "m.tech",
+        "mtech",
+        "m.e",
+        "ms",
+        "msc"
+    ],
+    "phd": [
+        "phd",
+        "doctorate"
+    ]
+}

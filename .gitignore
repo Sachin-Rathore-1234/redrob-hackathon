@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Outputs
+outputs/
+*.log
+
+# Environment
+.env
+
+# Large datasets
+data/candidates.jsonl
+data/[PUB] India_runs_data_and_ai_challenge.zip
+
+# Large generated artifacts
+artifacts/dense/embeddings.npy
+artifacts/dense/faiss.index
+artifacts/sparse/bm25.pkl
+artifacts/features/candidate_texts.pkl
