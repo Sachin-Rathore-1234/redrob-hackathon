@@ -1,15 +1,11 @@
 import json
+import os
 import pickle
 import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
-import torch
-from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
-
-torch.set_num_threads(1)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
@@ -26,20 +22,80 @@ from config import (
 from utils.helper import parse_candidate
 
 
-def main():
-    print("Loading embedding model...")
+ENCODE_BATCH_SIZE = int(os.environ.get("EMBEDDING_BATCH_SIZE", "256"))
+ENCODE_CHUNK_SIZE = int(os.environ.get("EMBEDDING_CHUNK_SIZE", "4096"))
+FORCE_REBUILD = os.environ.get("FORCE_REBUILD_EMBEDDINGS") == "1"
 
-    model = SentenceTransformer(
-        EMBEDDING_MODEL,
-        device="cpu"
+
+def configure_torch():
+    import torch
+
+    thread_count = min(4, os.cpu_count() or 1)
+    torch.set_num_threads(thread_count)
+
+
+def choose_device():
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    if torch.backends.mps.is_available():
+        return "mps"
+
+    return "cpu"
+
+
+def count_candidates():
+    with open(CANDIDATES_PATH, "r", encoding="utf-8") as f:
+        return sum(1 for _ in f)
+
+
+def artifacts_are_current(candidate_count):
+    required_paths = [
+        EMBEDDINGS_PATH,
+        FEATURE_TABLE_PATH,
+        CANDIDATE_IDS_PATH,
+        CANDIDATE_TEXTS_PATH,
+    ]
+
+    if any(not path.exists() for path in required_paths):
+        return False
+
+    candidates_mtime = CANDIDATES_PATH.stat().st_mtime
+
+    if any(path.stat().st_mtime < candidates_mtime for path in required_paths):
+        return False
+
+    embeddings = np.load(
+        EMBEDDINGS_PATH,
+        mmap_mode="r",
     )
+
+    return embeddings.shape[0] == candidate_count
+
+
+def main():
+    print("Counting candidates...")
+    candidate_count = count_candidates()
+    print("Candidates =", candidate_count)
+
+    if not FORCE_REBUILD and artifacts_are_current(candidate_count):
+        print("Embedding artifacts are current; skipping rebuild.")
+        return
+
+    if FORCE_REBUILD:
+        print("FORCE_REBUILD_EMBEDDINGS=1; rebuilding artifacts.")
+
+    configure_torch()
 
     candidate_ids = []
     candidate_texts = []
     feature_rows = []
 
+    print("Parsing candidates...")
     with open(CANDIDATES_PATH, "r", encoding="utf-8") as f:
-        for line in tqdm(f):
+        for line in tqdm(f, total=candidate_count):
             data = json.loads(line)
             candidate = parse_candidate(data)
 
@@ -70,6 +126,8 @@ def main():
                 }
             )
 
+    import pandas as pd
+
     df = pd.DataFrame(feature_rows)
 
     FEATURE_TABLE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -87,27 +145,51 @@ def main():
 
     print("Candidate texts saved.")
     print()
-    print("Starting multi-process pool...")
-    pool = model.start_multi_process_pool()
 
-    print("Generating embeddings (multi-process)...")
-    embeddings = model.encode(
-        candidate_texts,
-        pool=pool,
-        batch_size=256,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=True
-    )
-    model.stop_multi_process_pool(pool)
+    device = choose_device()
+    print("Loading embedding model on", device)
+    from sentence_transformers import SentenceTransformer
 
-    print("Embedding shape =", embeddings.shape)
-
-    np.save(
-        EMBEDDINGS_PATH,
-        embeddings
+    model = SentenceTransformer(
+        EMBEDDING_MODEL,
+        device=device,
     )
 
+    embedding_dimension = model.get_sentence_embedding_dimension()
+    temp_embeddings_path = EMBEDDINGS_PATH.with_suffix(".npy.tmp")
+
+    embeddings = np.lib.format.open_memmap(
+        temp_embeddings_path,
+        mode="w+",
+        dtype=np.float32,
+        shape=(candidate_count, embedding_dimension),
+    )
+
+    print("Generating embeddings in chunks...")
+    print("Batch size =", ENCODE_BATCH_SIZE)
+    print("Chunk size =", ENCODE_CHUNK_SIZE)
+
+    for start in tqdm(
+        range(0, candidate_count, ENCODE_CHUNK_SIZE),
+        total=(candidate_count + ENCODE_CHUNK_SIZE - 1) // ENCODE_CHUNK_SIZE,
+    ):
+        end = min(start + ENCODE_CHUNK_SIZE, candidate_count)
+
+        chunk_embeddings = model.encode(
+            candidate_texts[start:end],
+            batch_size=ENCODE_BATCH_SIZE,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        ).astype(np.float32)
+
+        embeddings[start:end] = chunk_embeddings
+        embeddings.flush()
+
+    del embeddings
+    temp_embeddings_path.replace(EMBEDDINGS_PATH)
+
+    print("Embedding shape =", (candidate_count, embedding_dimension))
     print("Embeddings saved.")
     print(df.head())
     print()
