@@ -1,50 +1,13 @@
-# Redrob Hackathon Resume Ranker
+# How to Use
 
-A hybrid resume ranking system for the **Redrob Senior AI Engineer Hackathon** that combines:
-
-- Semantic Retrieval (Sentence Transformers + FAISS)
-- BM25 Keyword Retrieval
-- Rule-based Feature Scoring
-- Candidate Ranking with Explainable Reasoning
-
-The system returns the **Top 100 candidates** for the provided job description.
-
----
-
-# Repository Structure
-
-```
-.
-├── artifacts/
-│   ├── dense/
-│   ├── sparse/
-│   └── features/
-├── data/
-│   ├── job_description.docx
-│   ├── submission_spec.docx
-│   └── candidates.jsonl          # NOT included
-├── modules/
-├── pipelines/
-│   ├── offline/
-│   └── online/
-├── outputs/
-├── rank.py
-├── requirements.txt
-└── README.md
-```
-
----
-
-# Setup
-
-Clone the repository:
+## Step 1: Clone the Repository
 
 ```bash
 git clone https://github.com/Sachin-Rathore-1234/redrob-hackathon.git
 cd redrob-hackathon
 ```
 
-Create a virtual environment:
+## Step 2: Create a Virtual Environment
 
 ```bash
 python -m venv venv
@@ -64,33 +27,27 @@ source venv/bin/activate
 venv\Scripts\activate
 ```
 
-Install dependencies:
+## Step 3: Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+## Step 4: Add the Official Dataset
 
-# Dataset
+The repository does **not** include the official candidate dataset.
 
-The official competition dataset is **not included** in this repository.
-
-Place the provided candidate dataset here:
+Place the provided dataset at:
 
 ```
 data/candidates.jsonl
 ```
 
-The repository contains a validation check that will display a helpful error message if the dataset is missing.
-
 ---
 
-# Offline Preprocessing
+# First-Time Setup (Offline Preprocessing)
 
-The system is intentionally divided into an **offline preprocessing stage** and an **online ranking stage**.
-
-Run the following commands **once** after placing the dataset:
+Run the following commands **once** for every new candidate dataset:
 
 ```bash
 python -m pipelines.offline.build_embeddings
@@ -99,32 +56,31 @@ python -m pipelines.offline.build_bm25
 python -m pipelines.offline.build_query_embedding
 ```
 
-These scripts generate reusable artifacts:
+These commands generate reusable artifacts including:
 
-- Dense candidate embeddings
+- Candidate embeddings
 - FAISS index
 - BM25 index
-- Candidate feature tables
+- Feature tables
 - Query embedding
-
-These artifacts are stored inside the `artifacts/` directory.
 
 ---
 
-# Runtime Notes
+# Runtime Information
 
-The embedding generation step computes embeddings for the **entire candidate dataset**.
+The offline preprocessing stage computes embeddings for the **entire candidate dataset**.
 
-For datasets containing approximately **100,000 resumes**, this preprocessing step may take **20–60 minutes** on a CPU-only laptop depending on hardware.
+For a dataset of approximately **100,000 resumes (≈465 MB)**, this step may take **20–60 minutes** on a CPU-only machine depending on hardware.
 
-This behavior is expected because embeddings are generated only once.
+This is expected and only needs to be performed **once per dataset**.
 
-Subsequent executions reuse the cached artifacts and therefore do **not** regenerate embeddings unless:
+If the artifacts already exist and the dataset has not changed, rerunning:
 
-- the candidate dataset changes, or
-- `FORCE_REBUILD_EMBEDDINGS=1` is set.
+```bash
+python -m pipelines.offline.build_embeddings
+```
 
-If the artifacts already exist and are up-to-date, the embedding pipeline exits immediately.
+will immediately detect the cached artifacts and skip rebuilding.
 
 Example:
 
@@ -136,15 +92,15 @@ Embedding artifacts are current; skipping rebuild.
 
 ---
 
-# Online Ranking
+# Running the Ranker (Online)
 
-Once preprocessing is complete, ranking candidates requires only:
+After preprocessing has completed, generate the submission CSV:
 
 ```bash
 python rank.py --out outputs/submission.csv
 ```
 
-The online pipeline:
+The online ranking pipeline:
 
 - loads cached embeddings
 - loads the FAISS index
@@ -152,104 +108,55 @@ The online pipeline:
 - embeds only the job description
 - retrieves candidates
 - computes semantic and feature scores
-- produces the final ranking
+- generates the final Top-100 ranking
 
 No candidate embeddings are recomputed during ranking.
 
 ---
 
-# Runtime Requirement
+# Competition Runtime Requirement
 
-The Redrob submission specification requires the **ranking pipeline** to execute within **5 minutes on CPU**.
+The Redrob Hackathon specifies that the **ranking pipeline** should execute within **5 minutes on CPU**.
 
-This repository satisfies that requirement because:
+This repository satisfies that requirement by separating the workflow into:
 
-- candidate embeddings are precomputed offline
-- FAISS and BM25 indices are reused
-- only the job description embedding is generated during ranking
+### Offline (one-time)
 
-The online ranking pipeline completes in only a few seconds on a typical CPU.
+- Build embeddings
+- Build FAISS
+- Build BM25
+- Build query embedding
 
----
+These preprocessing steps may take longer than five minutes for large datasets because embeddings are generated for every candidate.
 
-# Output
-
-Generate the submission CSV:
+### Online (every ranking request)
 
 ```bash
 python rank.py --out outputs/submission.csv
 ```
 
-Output format:
+The online ranking stage reuses the cached artifacts and completes in only a few seconds on a typical CPU, satisfying the competition runtime requirement.
+
+---
+
+# Output
+
+Running
+
+```bash
+python rank.py --out outputs/submission.csv
+```
+
+produces a CSV with the required format:
 
 ```
 candidate_id,rank,score,reasoning
 ```
 
-The generated file contains:
+The output contains:
 
-- exactly 100 rows
-- unique candidate IDs
-- ranks from 1–100
-- non-increasing scores
-- human-readable reasoning for every candidate
-
----
-
-# Cached Artifacts
-
-Generated artifacts include:
-
-```
-artifacts/
-├── dense/
-│   ├── embeddings.npy
-│   ├── faiss.index
-│   └── query_embedding.npy
-├── sparse/
-│   └── bm25.pkl
-└── features/
-    ├── candidate_ids.json
-    ├── candidate_texts.pkl
-    └── feature_table.parquet
-```
-
-These artifacts are reused by the ranking pipeline.
-
----
-
-# Notes
-
-- CPU-only execution
-- No external APIs
-- No network access required during ranking
-- Compatible with Apple Silicon and x86 CPUs
-- Embedding generation uses chunked batching to reduce memory usage
-- Cached artifacts prevent unnecessary recomputation
-
----
-
-# Submission Metadata
-
-Before final submission, update:
-
-```
-submission_metadata.yaml
-```
-
-with your actual:
-
-- Team information
-- Contact details
-- GitHub repository
-- Compute environment
-- Demo/Sandbox links (if applicable)
-
----
-
-# Author
-
-**Sachin Rathore**
-
-GitHub:
-https://github.com/Sachin-Rathore-1234
+- Exactly 100 ranked candidates
+- Unique candidate IDs
+- Ranks from 1 to 100
+- Scores in descending order
+- Explainable reasoning for each candidate
