@@ -1,14 +1,13 @@
-# Redrob Hackathon – Intelligent Candidate Discovery & Ranking
+# Redrob Hackathon Resume Ranker
 
-This repository contains our solution for the Redrob Intelligent Candidate Discovery & Ranking Challenge.
+A hybrid resume ranking system for the **Redrob Senior AI Engineer Hackathon** that combines:
 
-The system ranks candidates for a given Job Description using a hybrid retrieval and scoring pipeline combining:
+- Semantic Retrieval (Sentence Transformers + FAISS)
+- BM25 Keyword Retrieval
+- Rule-based Feature Scoring
+- Candidate Ranking with Explainable Reasoning
 
-- Dense semantic retrieval (Sentence Transformers + FAISS)
-- Sparse retrieval (BM25)
-- Structured feature engineering
-- Learning-to-Rank (LightGBM)
-- Rule-based business signals
+The system returns the **Top 100 candidates** for the provided job description.
 
 ---
 
@@ -16,48 +15,56 @@ The system ranks candidates for a given Job Description using a hybrid retrieval
 
 ```
 .
-├── data/
-│   ├── candidates.jsonl          # Place the released dataset here
-│   ├── job_description.txt
-│   └── ...
-│
 ├── artifacts/
 │   ├── dense/
-│   ├── bm25/
-│   ├── features/
-│   └── ...
-│
+│   ├── sparse/
+│   └── features/
+├── data/
+│   ├── job_description.docx
+│   ├── submission_spec.docx
+│   └── candidates.jsonl          # NOT included
+├── modules/
 ├── pipelines/
 │   ├── offline/
-│   │   ├── build_embeddings.py
-│   │   ├── build_faiss.py
-│   │   ├── build_bm25.py
-│   │   └── ...
-│   │
 │   └── online/
-│       └── ...
-│
+├── outputs/
 ├── rank.py
 ├── requirements.txt
-└── submission_metadata.yaml
+└── README.md
 ```
 
 ---
 
-# Requirements
+# Setup
 
-- Python 3.11
-- CPU only
-- macOS / Linux
-
-Create a virtual environment
+Clone the repository:
 
 ```bash
-python3.11 -m venv venv
+git clone https://github.com/Sachin-Rathore-1234/redrob-hackathon.git
+cd redrob-hackathon
+```
+
+Create a virtual environment:
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+### macOS / Linux
+
+```bash
 source venv/bin/activate
 ```
 
-Install dependencies
+### Windows
+
+```bash
+venv\Scripts\activate
+```
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -67,146 +74,182 @@ pip install -r requirements.txt
 
 # Dataset
 
-The released dataset is **not included** in this repository.
+The official competition dataset is **not included** in this repository.
 
-Download the official hackathon dataset and place
-
-```
-candidates.jsonl
-```
-
-inside
+Place the provided candidate dataset here:
 
 ```
-data/
+data/candidates.jsonl
 ```
 
-Result:
-
-```
-data/
-    candidates.jsonl
-```
+The repository contains a validation check that will display a helpful error message if the dataset is missing.
 
 ---
 
-# Offline Precomputation
+# Offline Preprocessing
 
-The following scripts build reusable artifacts.
+The system is intentionally divided into an **offline preprocessing stage** and an **online ranking stage**.
 
-These are **offline preprocessing steps** and are **NOT part of the online ranking runtime**.
-
-## 1. Build candidate embeddings
+Run the following commands **once** after placing the dataset:
 
 ```bash
 python -m pipelines.offline.build_embeddings
-```
-
-## 2. Build FAISS index
-
-```bash
 python -m pipelines.offline.build_faiss
-```
-
-## 3. Build BM25 index
-
-```bash
 python -m pipelines.offline.build_bm25
+python -m pipelines.offline.build_query_embedding
 ```
 
-These scripts generate:
+These scripts generate reusable artifacts:
 
-- candidate embeddings
+- Dense candidate embeddings
 - FAISS index
 - BM25 index
-- engineered feature tables
+- Candidate feature tables
+- Query embedding
 
-The embedding builder detects existing up-to-date artifacts and skips unnecessary recomputation.
-
----
-
-# Ranking (Submission Generation)
-
-After preprocessing has completed, generate the submission:
-
-```bash
-python rank.py
-```
-
-This loads the precomputed artifacts and produces the ranked submission CSV.
+These artifacts are stored inside the `artifacts/` directory.
 
 ---
 
 # Runtime Notes
 
-The Redrob competition limits the **ranking step** to:
+The embedding generation step computes embeddings for the **entire candidate dataset**.
 
-- CPU only
-- ≤16 GB RAM
-- ≤5 minutes runtime
-- No external API calls
+For datasets containing approximately **100,000 resumes**, this preprocessing step may take **20–60 minutes** on a CPU-only laptop depending on hardware.
 
-This repository follows that requirement by separating expensive preprocessing from online ranking.
+This behavior is expected because embeddings are generated only once.
 
-Offline embedding generation may take significantly longer depending on hardware.
+Subsequent executions reuse the cached artifacts and therefore do **not** regenerate embeddings unless:
 
-The online ranking stage only loads cached artifacts and performs retrieval + ranking.
+- the candidate dataset changes, or
+- `FORCE_REBUILD_EMBEDDINGS=1` is set.
 
----
+If the artifacts already exist and are up-to-date, the embedding pipeline exits immediately.
 
-# Methodology
+Example:
 
-The ranking pipeline consists of:
-
-1. Dense semantic retrieval using Sentence Transformers.
-2. FAISS Approximate Nearest Neighbor search.
-3. BM25 lexical retrieval.
-4. Hybrid candidate retrieval.
-5. Feature engineering using:
-   - semantic similarity
-   - lexical similarity
-   - structured profile features
-   - behavioral signals
-6. Learning-to-Rank with LightGBM.
-7. Final score calibration and ranking.
-
----
-
-# Reproducibility
-
-Complete workflow:
-
-```bash
-python3.11 -m venv venv
-
-source venv/bin/activate
-
-pip install -r requirements.txt
-
-python -m pipelines.offline.build_embeddings
-
-python -m pipelines.offline.build_faiss
-
-python -m pipelines.offline.build_bm25
-
-python rank.py
+```
+Counting candidates...
+Candidates = 100000
+Embedding artifacts are current; skipping rebuild.
 ```
 
 ---
 
-# Compute Environment
+# Online Ranking
 
-Tested on
+Once preprocessing is complete, ranking candidates requires only:
 
-- Apple MacBook Air M3
-- 16 GB RAM
-- Python 3.11
-- CPU execution
+```bash
+python rank.py --out outputs/submission.csv
+```
+
+The online pipeline:
+
+- loads cached embeddings
+- loads the FAISS index
+- loads the BM25 index
+- embeds only the job description
+- retrieves candidates
+- computes semantic and feature scores
+- produces the final ranking
+
+No candidate embeddings are recomputed during ranking.
+
+---
+
+# Runtime Requirement
+
+The Redrob submission specification requires the **ranking pipeline** to execute within **5 minutes on CPU**.
+
+This repository satisfies that requirement because:
+
+- candidate embeddings are precomputed offline
+- FAISS and BM25 indices are reused
+- only the job description embedding is generated during ranking
+
+The online ranking pipeline completes in only a few seconds on a typical CPU.
+
+---
+
+# Output
+
+Generate the submission CSV:
+
+```bash
+python rank.py --out outputs/submission.csv
+```
+
+Output format:
+
+```
+candidate_id,rank,score,reasoning
+```
+
+The generated file contains:
+
+- exactly 100 rows
+- unique candidate IDs
+- ranks from 1–100
+- non-increasing scores
+- human-readable reasoning for every candidate
+
+---
+
+# Cached Artifacts
+
+Generated artifacts include:
+
+```
+artifacts/
+├── dense/
+│   ├── embeddings.npy
+│   ├── faiss.index
+│   └── query_embedding.npy
+├── sparse/
+│   └── bm25.pkl
+└── features/
+    ├── candidate_ids.json
+    ├── candidate_texts.pkl
+    └── feature_table.parquet
+```
+
+These artifacts are reused by the ranking pipeline.
 
 ---
 
 # Notes
 
-- No hosted LLM APIs are used during ranking.
-- The online ranking stage uses only locally generated artifacts.
-- Precomputation is performed once and reused for subsequent ranking runs.
+- CPU-only execution
+- No external APIs
+- No network access required during ranking
+- Compatible with Apple Silicon and x86 CPUs
+- Embedding generation uses chunked batching to reduce memory usage
+- Cached artifacts prevent unnecessary recomputation
+
+---
+
+# Submission Metadata
+
+Before final submission, update:
+
+```
+submission_metadata.yaml
+```
+
+with your actual:
+
+- Team information
+- Contact details
+- GitHub repository
+- Compute environment
+- Demo/Sandbox links (if applicable)
+
+---
+
+# Author
+
+**Sachin Rathore**
+
+GitHub:
+https://github.com/Sachin-Rathore-1234
